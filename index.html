@@ -2,39 +2,71 @@
 <html lang="en"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title> scanner</title>
+<title>Door scanner</title>
 <style>
-  :root{--bg:#10141c;--fg:#f2f4f8;--mut:#9aa3b5;--ok:#1f9d55;--warn:#d98a00;--bad:#c93a3a}
+  :root{--bg:#0f131b;--card:#181e2a;--line:#2a3243;--fg:#f2f4f8;--mut:#98a2b6;--ok:#1f9d55;--warn:#d98a00;--bad:#c93a3a;--accent:#4c8dff}
   *{box-sizing:border-box}
-  html,body{height:100%;margin:0}
-  body{background:var(--bg);color:var(--fg);font:16px/1.4 system-ui,sans-serif;display:flex;flex-direction:column;transition:background .15s}
-  body.ok{background:var(--ok)} body.already{background:var(--warn)} body.invalid,body.denied{background:var(--bad)}
-  header{padding:12px 16px;display:flex;gap:8px;align-items:center;justify-content:space-between}
-  #reader{width:100%;max-width:480px;margin:0 auto}
-  #result{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:16px}
-  #big{font-size:44px;font-weight:800;margin:0}
-  #sub{font-size:22px;margin:6px 0 0}
-  form{padding:12px 16px calc(12px + env(safe-area-inset-bottom));display:flex;gap:8px}
-  input{flex:1;min-width:0;padding:12px;border-radius:8px;border:0;font:inherit}
-  button{padding:12px 16px;border:0;border-radius:8px;font:inherit;font-weight:600;cursor:pointer}
-  button:focus-visible,input:focus-visible{outline:3px solid #fff}
-  #setup{padding:16px;display:grid;gap:10px;max-width:480px;margin:auto;width:100%}
-  label{color:var(--mut)}
+  [hidden]{display:none!important}
+  html,body{margin:0;min-height:100%}
+  body{background:var(--bg);color:var(--fg);font:16px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    padding:max(16px,env(safe-area-inset-top)) 16px max(16px,env(safe-area-inset-bottom))}
+  .wrap{max-width:520px;margin:0 auto;display:flex;flex-direction:column;gap:14px}
+  h1{font-size:22px;margin:8px 0 0}
+  p.lead{margin:0;color:var(--mut)}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px}
+  label{display:block;color:var(--mut);font-size:14px;margin-bottom:6px}
+  .field{margin-bottom:14px}
+  input{width:100%;padding:13px 14px;border-radius:10px;border:1px solid var(--line);background:#0f131b;color:var(--fg);font:inherit}
+  input::placeholder{color:#6b7488}
+  button{padding:13px 18px;border:0;border-radius:10px;font:inherit;font-weight:600;cursor:pointer;background:var(--line);color:var(--fg)}
+  button.primary{background:var(--accent);color:#fff;width:100%}
+  button:focus-visible,input:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+  .bar{display:flex;align-items:center;justify-content:space-between;gap:12px}
+  #count{font-size:18px;font-weight:700}
+  .frame{position:relative;border-radius:14px;overflow:hidden;background:#000;border:1px solid var(--line);aspect-ratio:1/1;max-height:52vh;margin:0 auto;width:100%}
+  #reader{width:100%;height:100%}
+  #reader video{width:100%!important;height:100%!important;object-fit:cover}
+  #reader img{display:none}
+  #cam{margin:0;color:var(--mut);font-size:14px;text-align:center;min-height:20px}
+  #status{border-radius:14px;padding:22px 16px;text-align:center;background:var(--card);border:1px solid var(--line);transition:background .15s}
+  #status.ok{background:var(--ok);border-color:var(--ok)}
+  #status.already{background:var(--warn);border-color:var(--warn)}
+  #status.invalid,#status.denied,#status.error{background:var(--bad);border-color:var(--bad)}
+  #big{font-size:34px;font-weight:800;margin:0}
+  #sub{font-size:18px;margin:6px 0 0;color:#e6e9f0;overflow-wrap:anywhere}
+  form{display:flex;gap:8px}
+  form input{flex:1;min-width:0}
+  @media (min-width:700px){body{padding-top:32px}.frame{max-height:420px}}
 </style></head>
 <body>
-<section id="setup" hidden>
-  <h2>Scanner setup</h2>
-  <label>Web app URL <input id="url" placeholder="https://script.google.com/macros/s/…/exec"></label>
-  <label>Staff key <input id="key"></label>
-  <label>Your name <input id="by"></label>
-  <button id="save">Start scanning</button>
-</section>
-<main id="app" hidden style="display:none;flex:1;flex-direction:column">
-  <header><strong id="count"></strong><button id="reset">Settings</button></header>
-  <div id="reader"></div>
-  <div id="result"><p id="big">Ready</p><p id="sub">Point the camera at a ticket</p></div>
-  <form id="manual"><input id="code" placeholder="Type ticket code" autocomplete="off"><button>Check</button></form>
-</main>
+<div class="wrap">
+
+  <section id="setup" hidden>
+    <h1>Connect the scanner</h1>
+    <p class="lead">Enter these once. They are saved on this device.</p>
+    <div class="card">
+      <div class="field"><label for="url">Web app URL</label>
+        <input id="url" type="url" inputmode="url" autocapitalize="off" autocomplete="off" placeholder="https://script.google.com/macros/s/…/exec"></div>
+      <div class="field"><label for="key">Staff key</label>
+        <input id="key" autocapitalize="off" autocomplete="off" placeholder="From the Settings sheet"></div>
+      <div class="field"><label for="by">Your name</label>
+        <input id="by" autocomplete="off" placeholder="Shown next to each check-in"></div>
+      <button class="primary" id="save">Start scanning</button>
+    </div>
+  </section>
+
+  <section id="app" hidden>
+    <div class="bar"><strong id="count">Loading…</strong><button id="reset">Settings</button></div>
+    <div class="frame"><div id="reader"></div></div>
+    <p id="cam"></p>
+    <div id="status"><p id="big">Ready</p><p id="sub">Point the camera at a ticket</p></div>
+    <form id="manual">
+      <input id="code" placeholder="Or type the ticket code" autocomplete="off" autocapitalize="off">
+      <button type="submit">Check</button>
+    </form>
+  </section>
+
+</div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
 <script>
 var cfg = {};
@@ -45,8 +77,9 @@ var busy = false, scanner = null;
 function show() {
   var ready = cfg.url && cfg.key;
   $('setup').hidden = !!ready;
-  $('app').style.display = ready ? 'flex' : 'none';
+  $('app').hidden = !ready;
   if (ready) { start(); stats(); }
+  else { $('url').value = cfg.url || ''; $('key').value = cfg.key || ''; $('by').value = cfg.by || ''; }
 }
 $('save').onclick = function () {
   cfg = { url: $('url').value.trim(), key: $('key').value.trim(), by: $('by').value.trim() };
@@ -54,7 +87,8 @@ $('save').onclick = function () {
   show();
 };
 $('reset').onclick = function () {
-  try { localStorage.removeItem('cfg'); } catch (e) {}
+  var keep = cfg;
+  try { localStorage.setItem('cfg', JSON.stringify({ url: keep.url, by: keep.by })); } catch (e) {}
   location.reload();
 };
 function call(params) {
@@ -63,40 +97,38 @@ function call(params) {
 }
 function stats() {
   call({ action: 'stats' }).then(function (s) {
-    if (s.result === 'denied') return;
-    $('count').textContent = s.checkedIn + ' in, ' + s.remaining + ' to go';
-  }).catch(function () {});
+    $('count').textContent = s.result === 'denied' ? 'Wrong staff key' : s.checkedIn + ' in · ' + s.remaining + ' to go';
+  }).catch(function () { $('count').textContent = 'Offline'; });
+}
+function setStatus(cls, big, sub) {
+  $('status').className = cls; $('big').textContent = big; $('sub').textContent = sub;
 }
 function result(r) {
+  var who = [r.name, r.designation, r.organization].filter(Boolean).join(', ');
   var map = {
-    ok: ['Welcome', [r.name, r.designation, r.organization].filter(Boolean).join(', ')],
+    ok: ['Welcome', who],
     already: ['Already used', (r.name || '') + ' came in at ' + (r.checkedInAt || '')],
     invalid: ['Not a valid ticket', 'Check the code and try again'],
-    denied: ['Wrong staff key', 'Open Settings and re-enter it']
+    denied: ['Wrong staff key', 'Tap Settings and enter it again'],
+    error: ['No connection', 'Check the internet and try again']
   };
-  var m = map[r.result] || ['Error', 'Try again'];
-  document.body.className = r.result;
-  $('big').textContent = m[0];
-  $('sub').textContent = m[1];
+  var m = map[r.result] || map.error;
+  setStatus(map[r.result] ? r.result : 'error', m[0], m[1]);
   if (navigator.vibrate) navigator.vibrate(r.result === 'ok' ? 80 : [120, 80, 120]);
-  setTimeout(function () {
-    document.body.className = ''; $('big').textContent = 'Ready'; $('sub').textContent = 'Point the camera at a ticket';
-    busy = false;
-  }, 2200);
+  setTimeout(function () { setStatus('', 'Ready', 'Point the camera at a ticket'); busy = false; }, 2500);
   stats();
 }
 function check(token) {
   if (busy || !token) return;
   busy = true;
-  call({ action: 'scan', token: token, by: cfg.by || '' }).then(result).catch(function () {
-    result({ result: 'error' });
-  });
+  call({ action: 'scan', token: token, by: cfg.by || '' }).then(result).catch(function () { result({ result: 'error' }); });
 }
 function start() {
   if (scanner) return;
   scanner = new Html5Qrcode('reader');
-  scanner.start({ facingMode: 'environment' }, { fps: 10, qrbox: 240 }, check, function () {})
-    .catch(function () { $('sub').textContent = 'Camera blocked. Allow camera access, or type the code below.'; });
+  var box = function (w, h) { var s = Math.floor(Math.min(w, h) * 0.7); return { width: s, height: s }; };
+  scanner.start({ facingMode: 'environment' }, { fps: 10, qrbox: box, aspectRatio: 1 }, check, function () {})
+    .catch(function () { $('cam').textContent = 'Camera is blocked. Allow camera access in the browser, or type the code below.'; });
 }
 $('manual').onsubmit = function (e) { e.preventDefault(); check($('code').value.trim()); $('code').value = ''; };
 show();
