@@ -78,7 +78,7 @@ function setup() {
       ['address', '', 'Organization address (invoice)'],
       ['contact', '', 'Phone / email on invoice'],
       ['panVat', '', 'PAN / VAT number (optional)'],
-      ['logoDriveFileId', '', 'Upload logo to Google Drive, paste its file ID (between /d/ and /view in the link)'],
+      ['logoDriveFileId', '', 'Paste full Google Drive link. Set sharing to "Anyone with the link".'],
       ['invoiceNote', 'Thank you for registering.', 'Invoice footer text']
     ]);
     st.getRange(1, 1, 1, 3).setFontWeight('bold');
@@ -242,10 +242,19 @@ function safe_(t) {
 function logoUri_(s) {
   try {
     if (!s.logoDriveFileId) return '';
-    const b = DriveApp.getFileById(String(s.logoDriveFileId).trim()).getBlob();
+    
+    // Automatically extract just the ID if the full URL was pasted
+    let id = String(s.logoDriveFileId).trim();
+    if (id.indexOf('/d/') > -1) {
+      id = id.split('/d/')[1].split('/')[0];
+    } else if (id.indexOf('id=') > -1) {
+      id = id.split('id=')[1].split('&')[0];
+    }
+    
+    const b = DriveApp.getFileById(id).getBlob();
     return 'data:' + b.getContentType() + ';base64,' + Utilities.base64Encode(b.getBytes());
   } catch (e) {
-    SpreadsheetApp.getActive().toast('Logo could not be read. Check logoDriveFileId in Settings.');
+    SpreadsheetApp.getUi().alert('Logo Error: Could not read the image.\n\nPlease ensure:\n1. The Google Drive link is correct in Settings.\n2. The image sharing is set to "Anyone with the link".');
     return '';
   }
 }
@@ -269,24 +278,39 @@ function folder_(name) {
 function invoiceHtml_(r, s, logo, qr) {
   const no = 'INV-' + pad_(r[C.SERIAL - 1]);
   const date = Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd');
+  
   const line = (a, b) => b
-    ? '<tr><td style="padding:3px 14px 3px 0;color:#666">' + a + '</td><td>' + esc_(b) + '</td></tr>'
+    ? '<tr><td style="padding:4px 14px 4px 0;color:#666;width:100px;">' + a + '</td><td style="font-weight:500;">' + esc_(b) + '</td></tr>'
     : '';
+
+  // This puts the logo exactly in the top left area
+  const logoHtml = logo ? '<img src="' + logo + '" height="80" style="display:block;margin-bottom:12px;">' : '';
+
+  return '<div style="font-family:Arial,sans-serif;font-size:13px;color:#222;max-width:700px;margin:0 auto;">'
     
-  return '<div style="font-family:Arial,sans-serif;font-size:13px;color:#222">'
-    + '<table width="100%"><tr><td></td>'
-    + '<td align="right"><b style="font-size:26px">INVOICE</b><br>' + no + '<br>Date: ' + date + '</td></tr></table><hr>'
+    // --- HEADER WITH LOGO ON LEFT ---
+    + '<table width="100%"><tr>'
+    + '<td valign="top" width="60%">'
+    + logoHtml
+    + '<b style="font-size:16px;">' + esc_(s.orgName) + '</b><br>'
+    + '<span style="color:#555;">' + esc_(s.address) + '</span><br>'
+    + '<span style="color:#555;">' + esc_(s.contact) + '</span>'
+    + (s.panVat ? '<br><span style="color:#555;">PAN/VAT: ' + esc_(s.panVat) + '</span>' : '')
+    + '</td>'
+    + '<td align="right" valign="top" width="40%">'
+    + '<b style="font-size:28px;color:#000;">INVOICE</b><br>'
+    + '<span style="font-size:14px;color:#555;">' + no + '</span><br>'
+    + '<span style="font-size:14px;color:#555;">Date: ' + date + '</span>'
+    + '</td>'
+    + '</tr></table>'
+
+    // --- DETAILS SECTION ---
+    + '<hr style="border:0;border-top:1px solid #ccc;margin:20px 0;">'
+    + '<table width="100%" style="margin-top:14px;"><tr><td valign="top" width="55%">'
     
-    // Organization Info
-    + '<b style="font-size:15px">' + esc_(s.orgName) + '</b><br>' + esc_(s.address) + '<br>' + esc_(s.contact)
-    + (s.panVat ? '<br>PAN/VAT: ' + esc_(s.panVat) : '')
-    
-    // Logo placed right above "Participants details"
-    + '<div style="margin:12px 0;">' + (logo ? '<img src="' + logo + '" height="64">' : '') + '</div>'
-    
-    // Participants details & Event details (No Description/Amount table)
-    + '<table width="100%" style="margin-top:14px"><tr><td valign="top">'
-    + '<h3 style="margin:0 0 6px">Participants details</h3><table>' 
+    // Participants details
+    + '<h3 style="margin:0 0 10px 0;font-size:15px;color:#000;">Participants details</h3>'
+    + '<table style="width:100%;">' 
     + line('Name', r[C.NAME - 1]) 
     + line('Organization', r[C.ORG - 1])
     + line('Designation', r[C.DESIG - 1]) 
@@ -295,16 +319,25 @@ function invoiceHtml_(r, s, logo, qr) {
     + line('Check-in Time', r[C.TIME - 1]) 
     + line('Scanned By', r[C.BY - 1]) 
     + '</table>'
-    + '<h3 style="margin:14px 0 6px">Event details</h3><table>' 
+    
+    // Event details
+    + '<h3 style="margin:20px 0 10px 0;font-size:15px;color:#000;">Event details</h3>'
+    + '<table style="width:100%;">' 
     + line('Event', s.eventName) 
     + line('Date', s.eventDate) 
     + line('Venue', s.venue) 
     + '</table>'
-    + '</td><td align="right" valign="top"><img src="' + qr + '" width="130" height="130"><br>'
-    + '<span style="font-size:11px;color:#666">Ticket code: ' + esc_(r[C.CODE - 1]) + '</span></td></tr></table><br>'
     
-    // Footer
-    + '<p style="margin-top:30px;color:#555">' + esc_(s.invoiceNote) + '</p></div>';
+    // QR Code section on the right
+    + '</td><td align="right" valign="top" width="45%">'
+    + '<img src="' + qr + '" width="150" height="150" style="border:1px solid #eee;border-radius:8px;padding:4px;"><br>'
+    + '<span style="font-size:11px;color:#777;">Ticket code: ' + esc_(r[C.CODE - 1]) + '</span>'
+    + '</td></tr></table>'
+
+    // --- FOOTER ---
+    + '<hr style="border:0;border-top:1px solid #ccc;margin:25px 0 15px 0;">'
+    + '<p style="margin-top:10px;color:#666;font-size:12px;text-align:center;">' + esc_(s.invoiceNote) + '</p>'
+    + '</div>';
 }
 
 function ticketHtml_(r, s, logo, qr) {
