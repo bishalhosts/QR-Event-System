@@ -95,6 +95,18 @@ function settings_() {
   return o;
 }
 
+// SPEED: staff key from fast cache instead of reading the Settings sheet on every request.
+// If you change staffKey in Settings, the new key works within 5 minutes.
+function staffKey_() {
+  const cache = CacheService.getScriptCache();
+  let k = cache.get('staffKey');
+  if (k === null) {
+    k = String(settings_().staffKey);
+    cache.put('staffKey', k, 300);
+  }
+  return k;
+}
+
 // QR text = Name | Designation | Code. A normal phone camera shows name and designation; the scanner uses the code.
 function qrData_(r) {
   return r[C.NAME - 1] + ' | ' + r[C.DESIG - 1] + ' | ' + r[C.CODE - 1];
@@ -107,7 +119,7 @@ function generateQR() {
   if (n < 1) return SpreadsheetApp.getUi().alert('Add attendees first (Name column).');
   const v = sh.getRange(2, 1, n, HEAD.length).getValues();
   const serial = [], code = [], qr = [];
-  
+
   v.forEach((r, i) => {
     const row = i + 2;
     if (!r[C.NAME - 1]) {
@@ -117,15 +129,15 @@ function generateQR() {
       return;
     }
     serial.push([r[C.SERIAL - 1] || i + 1]);
-    
+
     // Only generate a new code if one doesn't exist yet
     const existingCode = r[C.CODE - 1];
     const newCode = existingCode || Utilities.getUuid().replace(/-/g, '').slice(0, 12);
     code.push([newCode]);
-    
+
     qr.push(['=HYPERLINK("https://api.qrserver.com/v1/create-qr-code/?size=400x400&download=1&data="&ENCODEURL(' + L_(C.NAME) + row + '&" | "&' + L_(C.DESIG) + row + '&" | "&' + L_(C.CODE) + row + '),"Download QR")']);
   });
-  
+
   sh.getRange(2, C.SERIAL, n, 1).setValues(serial);
   sh.getRange(2, C.CODE, n, 1).setValues(code);
   sh.getRange(2, C.QR, n, 1).setFormulas(qr);
@@ -137,12 +149,13 @@ function json_(o) {
   return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON);
 }
 
-// Scanner calls: ?action=scan&token=..&key=..&by=..   and   ?action=stats&key=..
+// Scanner calls: ?action=scan&token=..&key=..&by=..   ?action=list&key=..   ?action=stats&key=..
 function doGet(e) {
   const p = e.parameter || {};
   if (!p.action) return ContentService.createTextOutput('Check-in is running.');
-  if (p.key !== String(settings_().staffKey)) return json_({ result: 'denied' });
+  if (p.key !== staffKey_()) return json_({ result: 'denied' });
   if (p.action === 'scan') return json_(scan_(p.token, p.by));
+  if (p.action === 'list') return json_(list_());
   if (p.action === 'stats') return json_(stats_());
   return json_({ result: 'unknown' });
 }
@@ -172,13 +185,37 @@ function scan_(raw, by) {
   }
 }
 
+// Compact attendee list for the scanner page: [code, name, designation, organization, checkedInTime]
+// checkedInTime is '' when the person has not arrived yet. Phone and email are NOT sent.
+function list_() {
+  const sh = sheet_();
+  const n = sh.getLastRow() - 1;
+  if (n < 1) return { result: 'list', rows: [] };
+  const v = sh.getRange(2, 1, n, C.CODE).getValues();      // columns 1..Ticket code
+  const rows = [];
+  v.forEach(r => {
+    const code = String(r[C.CODE - 1] || '').trim();
+    if (!code) return;
+    const t = r[C.IN - 1] ? (String(r[C.TIME - 1]) || 'earlier') : '';
+    rows.push([code, r[C.NAME - 1], r[C.DESIG - 1], r[C.ORG - 1], t]);
+  });
+  return { result: 'list', rows: rows };
+}
+
+// Reads only the Checked in ... Ticket code columns instead of all 14.
 function stats_() {
   const sh = sheet_();
   const n = sh.getLastRow() - 1;
   if (n < 1) return { total: 0, checkedIn: 0, remaining: 0 };
-  const v = sh.getRange(2, 1, n, HEAD.length).getValues().filter(r => r[C.CODE - 1]);
-  const checkedIn = v.filter(r => r[C.IN - 1]).length;
-  return { total: v.length, checkedIn: checkedIn, remaining: v.length - checkedIn };
+  const v = sh.getRange(2, C.IN, n, C.CODE - C.IN + 1).getValues();
+  let total = 0, checkedIn = 0;
+  v.forEach(r => {
+    if (r[C.CODE - C.IN]) {
+      total++;
+      if (r[0]) checkedIn++;
+    }
+  });
+  return { total: total, checkedIn: checkedIn, remaining: total - checkedIn };
 }
 
 // ---------- Live check-in list: only people who have arrived, newest on top ----------
@@ -199,15 +236,15 @@ function liveSheet_() {
   return lg;
 }
 
+// Fewer sheet calls: format and values are written on one range (was 8 calls, now 4).
 function logCheckin_(r, time, by) {
   const lg = liveSheet_();
   const no = lg.getLastRow();                       // header counts as 1, so this is the next number
   lg.insertRowBefore(2);
-  const rg = lg.getRange(2, 1, 1, 7);
-  rg.clearFormat();
-  lg.getRange(2, 2).setNumberFormat('@');
-  lg.getRange(2, 6).setNumberFormat('@');
-  rg.setValues([[no, time, r[C.NAME - 1], r[C.ORG - 1], r[C.DESIG - 1], r[C.PHONE - 1], by || '']]);
+  lg.getRange(2, 1, 1, 7)
+    .clearFormat()
+    .setNumberFormats([['0', '@', '@', '@', '@', '@', '@']])   // text, so time and phone stay exact
+    .setValues([[no, time, r[C.NAME - 1], r[C.ORG - 1], r[C.DESIG - 1], r[C.PHONE - 1], by || '']]);
 }
 
 // Typing YES by hand in the Checked in column also fills the time and adds the person to the live list.
@@ -242,7 +279,7 @@ function safe_(t) {
 function logoUri_(s) {
   try {
     if (!s.logoDriveFileId) return '';
-    
+
     // Automatically extract just the ID if the full URL was pasted
     let id = String(s.logoDriveFileId).trim();
     if (id.indexOf('/d/') > -1) {
@@ -250,7 +287,7 @@ function logoUri_(s) {
     } else if (id.indexOf('id=') > -1) {
       id = id.split('id=')[1].split('&')[0];
     }
-    
+
     const b = DriveApp.getFileById(id).getBlob();
     return 'data:' + b.getContentType() + ';base64,' + Utilities.base64Encode(b.getBytes());
   } catch (e) {
@@ -278,7 +315,7 @@ function folder_(name) {
 function invoiceHtml_(r, s, logo, qr) {
   const no = 'INV-' + pad_(r[C.SERIAL - 1]);
   const date = Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd');
-  
+
   const line = (a, b) => b
     ? '<tr><td style="padding:4px 14px 4px 0;color:#666;width:100px;">' + a + '</td><td style="font-weight:500;">' + esc_(b) + '</td></tr>'
     : '';
@@ -287,7 +324,7 @@ function invoiceHtml_(r, s, logo, qr) {
   const logoHtml = logo ? '<img src="' + logo + '" height="80" style="display:block;margin-bottom:12px;">' : '';
 
   return '<div style="font-family:Arial,sans-serif;font-size:13px;color:#222;max-width:700px;margin:0 auto;">'
-    
+
     // --- HEADER WITH LOGO ON LEFT ---
     + '<table width="100%"><tr>'
     + '<td valign="top" width="60%">'
@@ -307,27 +344,27 @@ function invoiceHtml_(r, s, logo, qr) {
     // --- DETAILS SECTION ---
     + '<hr style="border:0;border-top:1px solid #ccc;margin:20px 0;">'
     + '<table width="100%" style="margin-top:14px;"><tr><td valign="top" width="55%">'
-    
+
     // Participants details
     + '<h3 style="margin:0 0 10px 0;font-size:15px;color:#000;">Participants details</h3>'
-    + '<table style="width:100%;">' 
-    + line('Name', r[C.NAME - 1]) 
+    + '<table style="width:100%;">'
+    + line('Name', r[C.NAME - 1])
     + line('Organization', r[C.ORG - 1])
-    + line('Designation', r[C.DESIG - 1]) 
-    + line('Phone', r[C.PHONE - 1]) 
-    + line('Email', r[C.EMAIL - 1]) 
-    + line('Check-in Time', r[C.TIME - 1]) 
-    + line('Scanned By', r[C.BY - 1]) 
+    + line('Designation', r[C.DESIG - 1])
+    + line('Phone', r[C.PHONE - 1])
+    + line('Email', r[C.EMAIL - 1])
+    + line('Check-in Time', r[C.TIME - 1])
+    + line('Scanned By', r[C.BY - 1])
     + '</table>'
-    
+
     // Event details
     + '<h3 style="margin:20px 0 10px 0;font-size:15px;color:#000;">Event details</h3>'
-    + '<table style="width:100%;">' 
-    + line('Event', s.eventName) 
-    + line('Date', s.eventDate) 
-    + line('Venue', s.venue) 
+    + '<table style="width:100%;">'
+    + line('Event', s.eventName)
+    + line('Date', s.eventDate)
+    + line('Venue', s.venue)
     + '</table>'
-    
+
     // QR Code section on the right
     + '</td><td align="right" valign="top" width="45%">'
     + '<img src="' + qr + '" width="150" height="150" style="border:1px solid #eee;border-radius:8px;padding:4px;"><br>'
@@ -375,19 +412,19 @@ function makePdfs_(kind) {
   const v = sh.getRange(2, 1, n, HEAD.length).getValues();
   const start = Date.now();
   let made = 0, noCode = 0, failed = 0, more = false, notCheckedIn = 0;
-  
+
   for (let i = 0; i < v.length; i++) {
     const r = v[i];
-    
+
     // Skip if no name, or already has a PDF
     if (!r[C.NAME - 1] || r[col - 1]) continue;
-    
+
     // If generating an invoice, check if they are checked in (YES). If not, skip.
     if (isInv && String(r[C.IN - 1]).trim().toUpperCase() !== 'YES') {
       notCheckedIn++;
       continue;
     }
-    
+
     if (!r[C.CODE - 1]) {
       noCode++;
       continue;
@@ -401,7 +438,7 @@ function makePdfs_(kind) {
       failed++;
       continue;
     }
-    
+
     // Pass logo only to invoice generation, leave ticket generation clean
     const html = isInv ? invoiceHtml_(r, s, logo, qr) : ticketHtml_(r, s, '', qr);
     const name = (isInv ? 'Invoice' : 'QR') + ' - ' + pad_(r[C.SERIAL - 1]) + ' - ' + safe_(r[C.NAME - 1]) + '.pdf';
@@ -409,7 +446,7 @@ function makePdfs_(kind) {
     sh.getRange(i + 2, col).setFormula('=HYPERLINK("' + f.getUrl() + '","Open PDF")');
     made++;
   }
-  
+
   SpreadsheetApp.getUi().alert(made + ' PDFs created in Drive folder "' + folderName + '".'
     + (noCode ? '\n' + noCode + ' skipped: run "Generate QR codes + PDFs" first.' : '')
     + (notCheckedIn ? '\n' + notCheckedIn + ' skipped: Not checked in yet (Invoices only).' : '')
