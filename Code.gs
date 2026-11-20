@@ -7,7 +7,7 @@ const COLS = [
   ['SERIAL', 'SN'], ['NAME', 'Name'], ['ORG', 'Organization'], ['DESIG', 'Designation'], ['PHONE', 'Phone'],
   ['EMAIL', 'Email'], ['OTHER', 'Other'], ['QRPDF', 'QR PDF'],
   ['IN', 'Checked in'], ['TIME', 'Check-in time (Nepal)'], ['BY', 'Scanned by'],
-  ['INV', 'Invoice PDF'], ['CODE', 'Ticket code'], ['QR', 'QR code (download link)']
+  ['INV', 'Invoice PDF'], ['CODE', 'Ticket code']
 ];
 
 const HEAD = COLS.map(c => c[1]);
@@ -47,7 +47,6 @@ function setup() {
   sh.setFrozenRows(1);
   const rows = sh.getMaxRows() - 1;
   sh.getRange(2, C.TIME, rows, 1).setNumberFormat('@');          // keep time as exact text
-  sh.setColumnWidth(C.QR, 170);
   sh.setColumnWidth(C.TIME, 190);
 
   // Green when Checked in = YES (strong green on the YES cell, light green on the row)
@@ -112,20 +111,18 @@ function qrData_(r) {
   return r[C.NAME - 1] + ' | ' + r[C.DESIG - 1] + ' | ' + r[C.CODE - 1];
 }
 
-// One step: serial numbers, ticket codes, QR download links AND a PDF (with all details) for every row that has a name.
+// One step: serial numbers, ticket codes AND a PDF (with all details) for every row that has a name.
 function generateQR() {
   const sh = sheet_();
   const n = sh.getLastRow() - 1;
   if (n < 1) return SpreadsheetApp.getUi().alert('Add attendees first (Name column).');
   const v = sh.getRange(2, 1, n, HEAD.length).getValues();
-  const serial = [], code = [], qr = [];
+  const serial = [], code = [];
 
   v.forEach((r, i) => {
-    const row = i + 2;
     if (!r[C.NAME - 1]) {
       serial.push(['']);
       code.push(['']);
-      qr.push(['']);
       return;
     }
     serial.push([r[C.SERIAL - 1] || i + 1]);
@@ -134,13 +131,10 @@ function generateQR() {
     const existingCode = r[C.CODE - 1];
     const newCode = existingCode || Utilities.getUuid().replace(/-/g, '').slice(0, 12);
     code.push([newCode]);
-
-    qr.push(['=HYPERLINK("https://api.qrserver.com/v1/create-qr-code/?size=400x400&download=1&data="&ENCODEURL(' + L_(C.NAME) + row + '&" | "&' + L_(C.DESIG) + row + '&" | "&' + L_(C.CODE) + row + '),"Download QR")']);
   });
 
   sh.getRange(2, C.SERIAL, n, 1).setValues(serial);
   sh.getRange(2, C.CODE, n, 1).setValues(code);
-  sh.getRange(2, C.QR, n, 1).setFormulas(qr);
   SpreadsheetApp.flush();
   makePdfs_('qr');                                   // creates the PDFs and fills the QR PDF column
 }
@@ -202,7 +196,7 @@ function list_() {
   return { result: 'list', rows: rows };
 }
 
-// Reads only the Checked in ... Ticket code columns instead of all 14.
+// Reads only the Checked in ... Ticket code columns instead of all columns.
 function stats_() {
   const sh = sheet_();
   const n = sh.getLastRow() - 1;
@@ -377,10 +371,12 @@ function invoiceHtml_(r, s, logo, qr) {
     + '</div>';
 }
 
+// QR ticket PDF: logo (from Settings) centered at the top, then event details, QR, and attendee info.
 function ticketHtml_(r, s, logo, qr) {
-  // The logo parameter is ignored here; it is only used for invoices.
   const line = (t, css) => t ? '<div style="' + css + '">' + esc_(t) + '</div>' : '';
+  const logoHtml = logo ? '<img src="' + logo + '" height="70" style="display:block;margin:0 auto 10px;">' : '';
   return '<div style="font-family:Arial,sans-serif;text-align:center;color:#222;padding:20px">'
+    + logoHtml
     + line(s.orgName, 'font-size:14px;color:#555;margin-top:6px')
     + line(s.eventName, 'font-size:28px;font-weight:bold;margin:8px 0')
     + line([s.eventDate, s.venue].filter(String).join('  |  '), 'font-size:13px;color:#555')
@@ -439,8 +435,8 @@ function makePdfs_(kind) {
       continue;
     }
 
-    // Pass logo only to invoice generation, leave ticket generation clean
-    const html = isInv ? invoiceHtml_(r, s, logo, qr) : ticketHtml_(r, s, '', qr);
+    // Logo is passed to both invoice and QR ticket PDFs.
+    const html = isInv ? invoiceHtml_(r, s, logo, qr) : ticketHtml_(r, s, logo, qr);
     const name = (isInv ? 'Invoice' : 'QR') + ' - ' + pad_(r[C.SERIAL - 1]) + ' - ' + safe_(r[C.NAME - 1]) + '.pdf';
     const f = folder.createFile(HtmlService.createHtmlOutput(html).getBlob().getAs('application/pdf').setName(name));
     sh.getRange(i + 2, col).setFormula('=HYPERLINK("' + f.getUrl() + '","Open PDF")');
